@@ -1,0 +1,5 @@
+.DS_Store
+logo-rave
+*.app
+build/
+.derivedData/

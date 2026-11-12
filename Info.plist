@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>Logo Rave</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.zhast.bignumbers.logorave</string>
+  <key>CFBundleName</key>
+  <string>Logo Rave</string>
+  <key>CFBundleDisplayName</key>
+  <string>Logo Rave</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>2.2</string>
+  <key>CFBundleVersion</key>
+  <string>13</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>LSMinimumSystemVersion</key>
+  <string>14.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Logo Rave listens to the room so the lid logo can flash with the music. Nothing is recorded.</string>
+</dict>
+</plist>
