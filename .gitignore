@@ -3,3 +3,7 @@ logo-rave
 *.app
 build/
 .derivedData/
+
+# Per-developer Xcode UI/debugger state
+xcuserdata/
+*.xcuserstate

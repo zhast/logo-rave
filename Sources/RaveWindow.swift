@@ -1,8 +1,43 @@
 import AppKit
 import QuartzCore
 
+/// Small value-type animation state, driven by the existing display clock.
+struct RippleField {
+    struct Ring {
+        var age: Double = 0
+        let strength: Double
+        var progress: Double { min(age / 1.15, 1) }
+    }
+
+    private(set) var rings: [Ring] = []
+    private var baseline = 0.0
+    private var cooldown = 0.0
+
+    mutating func update(level: Double, seconds: Double, active: Bool, reduceMotion: Bool) {
+        let dt = min(max(seconds, 0), 0.1)
+        guard active && !reduceMotion else {
+            rings.removeAll(keepingCapacity: true)
+            baseline = level
+            cooldown = 0
+            return
+        }
+        for i in rings.indices { rings[i].age += dt }
+        rings.removeAll { $0.progress >= 1 }
+        cooldown = max(0, cooldown - dt)
+        let change = abs(level - baseline)
+        if level > 0.04 && change > 0.09 && cooldown == 0 {
+            rings.append(Ring(strength: min(1, change * 3)))
+            if rings.count > 5 { rings.removeFirst(rings.count - 5) }
+            cooldown = 0.18
+            baseline = level
+        }
+        baseline += (level - baseline) * (1 - exp(-dt / 0.25))
+    }
+}
+
 final class RavePanel: NSView {
     var level = 0.0
+    var ripples = RippleField()
     var beat = false
     var status = "Listening to the room"
     var detail = ""
@@ -27,6 +62,7 @@ final class RavePanel: NSView {
 
         NSGraphicsContext.saveGraphicsState()
         shell.addClip()
+        drawRipples(in: lid)
         drawGlowingLogo(in: lid, level: level)
         NSGraphicsContext.restoreGraphicsState()
 
@@ -34,6 +70,10 @@ final class RavePanel: NSView {
         shell.lineWidth = 1
         shell.stroke()
 
+        let statusText = NSAttributedString(string: status, attributes: [
+            .font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.secondaryLabelColor,
+        ])
+        statusText.draw(at: NSPoint(x: (bounds.width - statusText.size().width) / 2, y: 228))
         let meter = NSRect(x: 36, y: 244, width: bounds.width - 72, height: 4)
         NSColor(white: 1, alpha: 0.1).setFill()
         NSBezierPath(roundedRect: meter, xRadius: 2, yRadius: 2).fill()
@@ -44,9 +84,24 @@ final class RavePanel: NSView {
         }
     }
 
+    private func drawRipples(in lid: NSRect) {
+        guard let artwork = Self.artwork else { return }
+        let contour = artwork.outline
+        for ring in ripples.rings {
+            let t = ring.progress
+            let eased = 1 - pow(1 - t, 2)
+            let scale = 1 + eased * 2.1
+            let box = artwork.rect(center: NSPoint(x: lid.midX, y: lid.midY), scale: scale)
+            let opacity = sin(Double.pi * t) * (1 - t) * (0.18 + 0.28 * ring.strength)
+            contour.draw(in: box, from: .zero, operation: .sourceOver,
+                         fraction: opacity, respectFlipped: true, hints: nil)
+        }
+    }
+
     private func drawGlowingLogo(in lid: NSRect, level: Double) {
-        guard let mark = Self.whiteLogo else { return }
-        let box = NSRect(x: lid.midX - 30, y: lid.midY - 36, width: 60, height: 72)
+        guard let artwork = Self.artwork else { return }
+        let mark = artwork.fill
+        let box = artwork.rect(center: NSPoint(x: lid.midX, y: lid.midY), scale: 1)
         if level > 0.03, let ctx = NSGraphicsContext.current?.cgContext {
             ctx.setShadow(
                 offset: .zero,
@@ -59,23 +114,15 @@ final class RavePanel: NSView {
         mark.draw(in: box, from: .zero, operation: .sourceOver, fraction: 0.22 + 0.78 * level, respectFlipped: true, hints: nil)
     }
 
-    private static let whiteLogo: NSImage? = {
-        guard let symbol = NSImage(systemSymbolName: "apple.logo", accessibilityDescription: "logo") else { return nil }
-        let canvas = NSImage(size: NSSize(width: 120, height: 144), flipped: false) { rect in
-            let config = NSImage.SymbolConfiguration(pointSize: 96, weight: .regular)
-                .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor.white]))
-            let mark = symbol.withSymbolConfiguration(config) ?? symbol
-            mark.draw(in: rect.insetBy(dx: 8, dy: 10))
-            return true
-        }
-        return canvas
-    }()
+    private static let artwork = LogoArtwork.make()
+
 }
 
 final class RaveApp: NSObject, NSApplicationDelegate {
     var onQuit: (() -> Void)?
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    // A menu-bar app stays alive when its transient popover/window is dismissed.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationWillTerminate(_ notification: Notification) { onQuit?() }
 }
@@ -88,13 +135,17 @@ final class RaveWindow: NSObject {
     let quit = NSButton(title: "Quit", target: nil, action: nil)
     var devices: [(id: UInt32, name: String)] = []
     var onMic: ((UInt32) -> Void)?
+    var onLightEnabled: ((Bool) -> Void)?
+    private let lightSwitch = NSButton(checkboxWithTitle: "Light enabled", target: nil, action: nil)
 
     override init() {
         super.init()
         let button = item.button
-        let image = NSImage(systemSymbolName: "apple.logo", accessibilityDescription: "Logo Rave")
+        let image = SymbolStyle.image("apple.logo", pointSize: 16, description: "Logo Rave")
         image?.isTemplate = true
         button?.image = image
+        button?.imageScaling = .scaleProportionallyDown
+        button?.toolTip = "Logo Rave — microphone and light controls"
         button?.target = self
         button?.action = #selector(toggle)
         button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -110,10 +161,17 @@ final class RaveWindow: NSObject {
         panel.addSubview(mics)
         quit.target = self
         quit.action = #selector(quitApp)
+        quit.image = SymbolStyle.image("power", pointSize: 12, description: "Quit")
+        quit.imagePosition = .imageLeading
         quit.isBordered = false
         quit.font = .systemFont(ofSize: 12)
-        quit.frame = NSRect(x: 16, y: 290, width: 48, height: 22)
+        quit.frame = NSRect(x: 16, y: 290, width: 66, height: 22)
         panel.addSubview(quit)
+        lightSwitch.frame = NSRect(x: 94, y: 288, width: 170, height: 26)
+        lightSwitch.state = .on
+        lightSwitch.target = self
+        lightSwitch.action = #selector(lightChanged)
+        panel.addSubview(lightSwitch)
     }
 
     func setMics(_ devices: [(id: UInt32, name: String)], selected: UInt32?) {
@@ -129,6 +187,12 @@ final class RaveWindow: NSObject {
         if let selected, let index = devices.firstIndex(where: { $0.id == selected }) {
             mics.selectItem(at: index)
         }
+    }
+
+    @objc private func lightChanged() {
+        let enabled = lightSwitch.state == .on
+        mics.isEnabled = enabled && !devices.isEmpty
+        onLightEnabled?(enabled)
     }
 
     @objc private func pickedMic() {
@@ -163,9 +227,14 @@ final class RaveWindow: NSObject {
         NSApp.terminate(nil)
     }
 
-    func show(level: Double) {
+    func show(level: Double, seconds: Double = 1.0 / 60.0, animated: Bool = true) {
         panel.level = level
-        panel.needsDisplay = true
+        panel.ripples.update(
+            level: level, seconds: seconds, active: popover.isShown && animated,
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        )
+        // Hidden panels need no redraws; no extra animation timers or layers.
+        if popover.isShown { panel.needsDisplay = true }
         item.button?.alphaValue = 0.35 + 0.65 * level
     }
 }
@@ -176,9 +245,10 @@ final class DisplayClock: NSObject {
     var onFrame: ((Double) -> Void)?
 
     func start() {
+        stop()
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             guard let self else { return }
-            let now = Date().timeIntervalSinceReferenceDate
+            let now = ProcessInfo.processInfo.systemUptime
             let dt = self.last == 0 ? 1.0 / 60.0 : min(0.05, max(0.001, now - self.last))
             self.last = now
             self.onFrame?(dt)
@@ -186,4 +256,12 @@ final class DisplayClock: NSObject {
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        last = 0
+    }
+
+    deinit { timer?.invalidate() }
 }

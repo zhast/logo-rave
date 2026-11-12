@@ -33,7 +33,9 @@ If you already run [LogoLight](https://github.com/Ark0N/LogoLight), quit it firs
 
 The apple sits in the menu bar.
 
-- Click it to choose the microphone and watch the level.
+- Click it to choose the microphone and watch the level. The built-in microphone is preferred for room audio; this does not change macOS input/output settings.
+- Audio route changes rebuild capture, stale samples decay to silence, and the panel reports when input is unavailable.
+- Uncheck **Light enabled** to hold the logo off and stop microphone capture. Check it again to resume. This is a session-only switch; quitting still restores normal logo behavior.
 - Right-click it and choose Quit when you want the logo back to normal.
 - Louder room, brighter logo. Quiet room, it fades back down.
 
@@ -55,3 +57,11 @@ The light follows loudness. It does not try to guess the tempo.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Xcode debugging
+
+Open `Logo Rave.xcodeproj`, select the **Logo Rave** scheme and **My Mac**, then Run (⌘R). Debug builds include symbols and disable Swift optimization. The original Makefile build remains available.
+
+To investigate an unexpected exit, set symbolic breakpoints on `-[NSApplication terminate:]`, `objc_exception_throw`, and `abort`. A normal termination is not an OS crash; capture the caller stack before attributing its cause.
+
+Icon artwork uses configured SF Symbols with aspect-fit geometry. Run `make icon` to regenerate all icon resolutions; both Makefile and Xcode builds include the resulting AppIcon.icns.

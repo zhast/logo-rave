@@ -64,6 +64,11 @@ enum LogoPlan {
         ], !wasUp)
     }
 
+    /// Force darkness even if the previous logical direction was already dark.
+    static func off(headingLit: Bool?) -> (cmds: [LogoCommand], heading: Bool) {
+        flash(lit: false, seconds: 0, headingLit: headingLit)
+    }
+
     static func restore() -> [LogoCommand] {
         [
             LogoCommand(key: "LEPWMFactorFadeDuration", value: 0.3),
@@ -117,13 +122,11 @@ struct FakeLogo {
 
 struct RaveMeter: Sendable {
     var release = 0.09
-    var ceilingDecay = 3.0
-    var range = 18.0
+    // Fixed dBFS scale: quiet room noise must not become its own full-scale peak.
+    var fullScale = -12.0
     var silence = -55.0
-    var floor = -42.0
 
     private(set) var envelope = 0.0
-    private(set) var ceiling = 0.0
     private(set) var loudness = 0.0
     private(set) var beat = false
 
@@ -131,12 +134,11 @@ struct RaveMeter: Sendable {
         let dt = max(seconds, 0)
         let level = min(max(kick ?? rms, 0), 1)
         envelope = max(level, envelope * exp(-dt / release))
-        ceiling = max(envelope, ceiling * exp(-dt / ceilingDecay), amplitude(dB: floor))
         if envelope <= amplitude(dB: silence) {
             loudness = 0
         } else {
-            let dB = 20 * log10(max(envelope / ceiling, 1e-9))
-            loudness = min(max(1 + dB / range, 0), 1)
+            let dB = 20 * log10(max(envelope, 1e-9))
+            loudness = min(max((dB - silence) / max(fullScale - silence, 1), 0), 1)
         }
         beat = loudness > 0.7
         return loudness
@@ -265,6 +267,18 @@ final class LogoBus {
         level = follower.shown
     }
 
+    func turnOff() {
+        if !enabled {
+            apply([LogoPlan.enable()])
+            enabled = true
+        }
+        let planned = LogoPlan.off(headingLit: headingLit)
+        apply(planned.cmds)
+        headingLit = planned.heading
+        follower = SmoothFollower()
+        level = 0
+    }
+
     func restore() {
         apply(LogoPlan.restore())
         headingLit = true
@@ -381,6 +395,69 @@ func selfTest() -> Int {
         return 1
     }
     print("level ok")
+    var background = RaveMeter()
+    var quietRoom = 0.0
+    for _ in 0..<600 { quietRoom = background.add(rms: 0.005, seconds: 1.0 / 60.0) }
+    guard quietRoom < 0.25 else {
+        fputs("quiet room incorrectly amplified to \(quietRoom)\n", stderr)
+        return 1
+    }
+    guard !RaveApp().applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared) else {
+        fputs("menu-bar app must survive its last window closing\n", stderr)
+        return 1
+    }
+    for heading in [true, false] {
+        var light = FakeLogo(factor: 0.8, headingLit: heading)
+        let off = LogoPlan.off(headingLit: heading)
+        for command in off.cmds { light.apply(command) }
+        guard light.factor == 0, !off.heading, light.keyboardLit else {
+            fputs("light off must reach zero and preserve keyboard intent\n", stderr)
+            return 1
+        }
+        let on = LogoPlan.glide(lit: true, seconds: 0, headingLit: off.heading)
+        for command in on.cmds { light.apply(command) }
+        guard light.factor == 1 else { return 1 }
+    }
+    let window = RaveWindow()
+    window.setMics([(id: 1, name: "Test microphone")], selected: 1)
+    var toggles: [Bool] = []
+    window.onLightEnabled = { toggles.append($0) }
+    guard let toggle = window.panel.subviews.compactMap({ $0 as? NSButton })
+        .first(where: { $0.title == "Light enabled" }) else { return 1 }
+    toggle.performClick(nil)
+    guard toggles == [false], !window.mics.isEnabled else { return 1 }
+    toggle.performClick(nil)
+    guard toggles == [false, true], window.mics.isEnabled else { return 1 }
+    guard let symbol = SymbolStyle.image("apple.logo", pointSize: 96) else { return 1 }
+    let fit = SymbolStyle.aspectFit(symbol.size, in: NSRect(x: 0, y: 0, width: 60, height: 72))
+    guard abs(fit.width / fit.height - symbol.size.width / symbol.size.height) < 0.0001,
+          fit.width <= 60, fit.height <= 72, abs(fit.midX - 30) < 0.001,
+          abs(fit.midY - 36) < 0.001 else { return 1 }
+    guard let artwork = LogoArtwork.make() else { return 1 }
+    let origin = NSPoint(x: 140, y: 136)
+    for scale in [1.0, 1.2, 2.0, 3.1] {
+        let rect = artwork.rect(center: origin, scale: scale)
+        guard abs(rect.minX + artwork.anchor.x * rect.width - origin.x) < 0.0001,
+              abs(rect.minY + artwork.anchor.y * rect.height - origin.y) < 0.0001,
+              artwork.fill.size == artwork.outline.size else { return 1 }
+    }
+    var ripples = RippleField()
+    ripples.update(level: 0.8, seconds: 0.016, active: true, reduceMotion: false)
+    guard ripples.rings.count == 1 else { return 1 }
+    for _ in 0..<120 { ripples.update(level: 0.8, seconds: 0.016, active: true, reduceMotion: false) }
+    guard ripples.rings.isEmpty else { return 1 }
+    for i in 0..<300 { ripples.update(level: i % 2 == 0 ? 0.1 : 1, seconds: 0.1, active: true, reduceMotion: false) }
+    guard ripples.rings.count <= 5 else { return 1 }
+    ripples.update(level: 0.7, seconds: 0.016, active: true, reduceMotion: true)
+    guard ripples.rings.isEmpty else { return 1 }
+    ripples.update(level: 0.1, seconds: 0.016, active: false, reduceMotion: false)
+    guard ripples.rings.isEmpty else { return 1 }
+    let snapshot = AudioLevelSnapshot(value: 0.9, capturedAt: 10)
+    guard snapshot.level(at: 10.1) == 0.9,
+          snapshot.level(at: 11) == 0,
+          snapshot.level(at: 9) == 0,
+          AudioLevelSnapshot().level(at: 10) == 0 else { return 1 }
+    print("quiet-room, lifecycle, off/on, toggle UI, and stale-audio regressions ok")
     return 0
 }
 
@@ -469,6 +546,19 @@ enum MicList {
         }
     }
 
+    /// This app listens to the room: prefer the stable built-in input without
+    /// changing the user's system input/output or forcing Bluetooth headset mode.
+    static func preferredID() -> UInt32? {
+        devices().first { device in
+            var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyTransportType,
+                mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            var transport: UInt32 = 0
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            return AudioObjectGetPropertyData(device.id, &address, 0, nil, &size, &transport) == noErr
+                && transport == kAudioDeviceTransportTypeBuiltIn
+        }?.id ?? defaultID()
+    }
+
     static func defaultID() -> UInt32? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
@@ -512,24 +602,52 @@ enum MicList {
 @_silgen_name("LogoCatch")
 func LogoCatch(_ block: @convention(block) () -> Void) -> Bool
 
+struct AudioLevelSnapshot {
+    var value = 0.0
+    var capturedAt: Double?
+    func isFresh(at now: Double) -> Bool {
+        guard let capturedAt else { return false }
+        return now >= capturedAt && now - capturedAt <= 0.5
+    }
+    func level(at now: Double) -> Double { isFresh(at: now) ? value : 0 }
+}
+
 final class RoomEar {
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private let lock = NSLock()
-    private var latest = 0.0
-    private var latestKick = 0.0
+    private var sample = AudioLevelSnapshot()
     private var low = 0.0
     var onLevel: ((Double) -> Void)?
 
     private var tapInstalled = false
+    private var configurationObserver: NSObjectProtocol?
+    private var configurationChanged = false
+    private var generation: UInt64 = 0
+
+    var needsRestart: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return configurationChanged
+    }
 
     func start(device: UInt32? = nil) throws {
+        stop()
+        // A disconnected CoreAudio device can invalidate the old engine's nodes.
+        engine = AVAudioEngine()
+        tapInstalled = false
         let input = engine.inputNode
-        if engine.isRunning { engine.stop() }
-        if tapInstalled {
-            input.removeTap(onBus: 0)
-            tapInstalled = false
+        lock.lock()
+        let currentGeneration = generation
+        lock.unlock()
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock()
+            if self.generation == currentGeneration { self.configurationChanged = true }
+            self.lock.unlock()
         }
-        if let device, let unit = input.audioUnit {
+        if let device, device != MicList.defaultID(), let unit = input.audioUnit {
             var id = AudioDeviceID(device)
             let status = AudioUnitSetProperty(
                 unit,
@@ -543,11 +661,14 @@ final class RoomEar {
                 throw NSError(domain: "logo-rave", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "could not switch microphone"])
             }
         }
-        let candidates = [input.outputFormat(forBus: 0), input.inputFormat(forBus: 0)]
-        var installed = false
-        for format in candidates where format.sampleRate > 0 && format.channelCount > 0 {
-            let ok = LogoCatch {
-                input.installTap(onBus: 0, bufferSize: 256, format: format) { [weak self] buffer, _ in
+        // outputFormat may still describe the previous Bluetooth route. Negotiate
+        // from the current hardware input; rebuild on configuration notifications.
+        let format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw NSError(domain: "logo-rave", code: 4, userInfo: [NSLocalizedDescriptionKey: "microphone is disconnected"])
+        }
+        let installed = LogoCatch {
+            input.installTap(onBus: 0, bufferSize: 256, format: format) { [weak self] buffer, _ in
                     guard let self else { return }
                     let frames = Int(buffer.frameLength)
                     guard buffer.format.commonFormat == .pcmFormatFloat32,
@@ -561,16 +682,12 @@ final class RoomEar {
                     }
                     let rms = (sum / Double(frames)).squareRoot()
                     self.lock.lock()
-                    self.latest = rms
-                    self.latestKick = rms
+                    if self.generation == currentGeneration {
+                        self.sample = AudioLevelSnapshot(value: rms.isFinite ? rms : 0,
+                                                         capturedAt: ProcessInfo.processInfo.systemUptime)
+                    }
                     self.lock.unlock()
                 }
-            }
-            if ok {
-                installed = true
-                break
-            }
-            input.removeTap(onBus: 0)
         }
         guard installed else {
             throw NSError(domain: "logo-rave", code: 2, userInfo: [NSLocalizedDescriptionKey: "microphone tap failed"])
@@ -596,14 +713,16 @@ final class RoomEar {
     func rms() -> Double {
         lock.lock()
         defer { lock.unlock() }
-        return latest
+        return sample.level(at: ProcessInfo.processInfo.systemUptime)
     }
 
-    func kick() -> Double {
+    var hasFreshAudio: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return latestKick
+        return sample.isFresh(at: ProcessInfo.processInfo.systemUptime)
     }
+
+    func kick() -> Double { rms() }
 
     private func kickEnergy(_ buffer: AVAudioPCMBuffer, channels: Int, frames: Int) -> Double {
         guard buffer.format.sampleRate > 0, let data = buffer.floatChannelData, frames > 0, channels > 0 else { return 0 }
@@ -619,76 +738,29 @@ final class RoomEar {
         return (sum / Double(frames)).squareRoot()
     }
 
-    func stop() { engine.stop() }
+    func stop() {
+        if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
+        configurationObserver = nil
+        lock.lock()
+        generation &+= 1
+        configurationChanged = false
+        sample = AudioLevelSnapshot()
+        lock.unlock()
+        engine.stop()
+        if tapInstalled { engine.inputNode.removeTap(onBus: 0) }
+        tapInstalled = false
+    }
+
+    deinit { stop() }
 }
 
 let args = CommandLine.arguments
 if args.contains("--self-test") { exit(Int32(selfTest())) }
 if args.contains("--theory") { exit(Int32(theoryTest())) }
 
-let simulate = args.contains("--simulate") || LogoBus.open() == nil
-let bus = simulate ? nil : LogoBus.open()
-let preview = args.contains("--preview")
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let ui = RaveWindow()
-
-let ear = RoomEar()
-var micOn = false
-let chosen = MicList.defaultID()
-ui.setMics(MicList.devices(), selected: chosen)
-ui.onMic = { id in
-    do {
-        try ear.start(device: id)
-        micOn = true
-    } catch {
-        micOn = false
-    }
-}
-if !preview {
-    DispatchQueue.main.async {
-        do {
-            try ear.start()
-            micOn = true
-        } catch {
-            micOn = false
-        }
-    }
-}
-
-var meter = RaveMeter()
-var shownLevel = 0.0
-let started = Date()
-let clock = DisplayClock()
-clock.onFrame = { dt in
-    let elapsed = Date().timeIntervalSince(started)
-    let rms: Double
-    let kick: Double
-    if args.contains("--bright") {
-        rms = 0.6
-        kick = 0.6
-    } else if preview || !micOn {
-        let beatOn = elapsed.truncatingRemainder(dividingBy: 0.5) < 0.08
-        rms = beatOn ? 0.6 : 0.004
-        kick = rms
-    } else {
-        rms = ear.rms()
-        kick = ear.kick()
-    }
-    let level = meter.add(rms: rms, seconds: dt, kick: kick)
-    let follow = 1 - exp(-dt / 0.035)
-    shownLevel += (level - shownLevel) * follow
-    bus?.setLevel(level, dt: dt)
-    ui.show(level: shownLevel)
-}
-let delegate = RaveApp()
-delegate.onQuit = {
-    bus?.restore()
-    ear.stop()
-}
-app.delegate = delegate
-clock.start()
-if preview || args.contains("--bright") {
-    DispatchQueue.main.async { ui.showPopover() }
-}
+let controller = RaveController(arguments: args)
+app.delegate = controller.delegate
+controller.start()
 app.run()

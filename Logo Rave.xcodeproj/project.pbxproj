@@ -1,0 +1,32 @@
+// !$*UTF8*$!
+{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+000000000000000000000017 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SymbolStyle.swift; sourceTree = "<group>"; };
+000000000000000000000018 = { isa = PBXBuildFile; fileRef = 000000000000000000000017; };
+000000000000000000000019 = { isa = PBXFileReference; lastKnownFileType = image.icns; path = Resources/AppIcon.icns; sourceTree = "<group>"; };
+00000000000000000000001A = { isa = PBXBuildFile; fileRef = 000000000000000000000019; };
+00000000000000000000001B = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (00000000000000000000001A); runOnlyForDeploymentPostprocessing = 0; };
+
+000000000000000000000015 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaveController.swift; sourceTree = "<group>"; };
+000000000000000000000016 = { isa = PBXBuildFile; fileRef = 000000000000000000000015; };
+
+000000000000000000000001 = { isa = PBXProject; attributes = { LastUpgradeCheck = 1600; }; buildConfigurationList = 000000000000000000000008; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; knownRegions = (en, Base); mainGroup = 000000000000000000000002; productRefGroup = 000000000000000000000004; projectDirPath = ""; projectRoot = ""; targets = (000000000000000000000005); };
+000000000000000000000002 = { isa = PBXGroup; children = (000000000000000000000019,000000000000000000000003,000000000000000000000014,000000000000000000000004); sourceTree = "<group>"; };
+000000000000000000000003 = { isa = PBXGroup; children = (000000000000000000000017,000000000000000000000015,00000000000000000000000E,00000000000000000000000F,000000000000000000000010); path = Sources; sourceTree = "<group>"; };
+000000000000000000000004 = { isa = PBXGroup; children = (000000000000000000000006); name = Products; sourceTree = "<group>"; };
+00000000000000000000000E = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "main.swift"; sourceTree = "<group>"; };
+00000000000000000000000F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RaveWindow.swift"; sourceTree = "<group>"; };
+000000000000000000000010 = { isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "try.m"; sourceTree = "<group>"; };
+000000000000000000000014 = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info.plist"; sourceTree = "<group>"; };
+000000000000000000000006 = { isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Logo Rave.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+000000000000000000000011 = { isa = PBXBuildFile; fileRef = 00000000000000000000000E; };
+000000000000000000000012 = { isa = PBXBuildFile; fileRef = 00000000000000000000000F; };
+000000000000000000000013 = { isa = PBXBuildFile; fileRef = 000000000000000000000010; };
+000000000000000000000007 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (000000000000000000000018,000000000000000000000016,000000000000000000000011,000000000000000000000012,000000000000000000000013); runOnlyForDeploymentPostprocessing = 0; };
+000000000000000000000005 = { isa = PBXNativeTarget; buildConfigurationList = 000000000000000000000009; buildPhases = (000000000000000000000007,00000000000000000000001B); buildRules = (); dependencies = (); name = "Logo Rave"; productName = "Logo Rave"; productReference = 000000000000000000000006; productType = "com.apple.product-type.application"; };
+000000000000000000000008 = { isa = XCConfigurationList; buildConfigurations = (00000000000000000000000A,00000000000000000000000B); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+000000000000000000000009 = { isa = XCConfigurationList; buildConfigurations = (00000000000000000000000C,00000000000000000000000D); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+00000000000000000000000A = { isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; SDKROOT = macosx; MACOSX_DEPLOYMENT_TARGET = 14.0; }; name = Debug; };
+00000000000000000000000B = { isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; SDKROOT = macosx; MACOSX_DEPLOYMENT_TARGET = 14.0; }; name = Release; };
+00000000000000000000000C = { isa = XCBuildConfiguration; buildSettings = { PRODUCT_NAME = "Logo Rave"; PRODUCT_BUNDLE_IDENTIFIER = com.zhast.bignumbers.logorave; INFOPLIST_FILE = Info.plist; GENERATE_INFOPLIST_FILE = NO; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; DEBUG_INFORMATION_FORMAT = "dwarf"; CODE_SIGN_IDENTITY = "-"; CODE_SIGN_STYLE = Manual; ENABLE_HARDENED_RUNTIME = NO; COMBINE_HIDPI_IMAGES = YES; }; name = Debug; };
+00000000000000000000000D = { isa = XCBuildConfiguration; buildSettings = { PRODUCT_NAME = "Logo Rave"; PRODUCT_BUNDLE_IDENTIFIER = com.zhast.bignumbers.logorave; INFOPLIST_FILE = Info.plist; GENERATE_INFOPLIST_FILE = NO; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = "-O"; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; CODE_SIGN_IDENTITY = "-"; CODE_SIGN_STYLE = Manual; ENABLE_HARDENED_RUNTIME = NO; COMBINE_HIDPI_IMAGES = YES; }; name = Release; };
+}; rootObject = 000000000000000000000001; }
