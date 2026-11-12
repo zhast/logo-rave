@@ -419,15 +419,15 @@ func selfTest() -> Int {
         guard light.factor == 1 else { return 1 }
     }
     let window = RaveWindow()
-    window.setMics([(id: 1, name: "Test microphone")], selected: 1)
+    guard !window.panel.subviews.contains(where: { $0 is NSPopUpButton }) else { return 1 }
     var toggles: [Bool] = []
     window.onLightEnabled = { toggles.append($0) }
     guard let toggle = window.panel.subviews.compactMap({ $0 as? NSButton })
         .first(where: { $0.title == "Light enabled" }) else { return 1 }
     toggle.performClick(nil)
-    guard toggles == [false], !window.mics.isEnabled else { return 1 }
+    guard toggles == [false] else { return 1 }
     toggle.performClick(nil)
-    guard toggles == [false, true], window.mics.isEnabled else { return 1 }
+    guard toggles == [false, true] else { return 1 }
     guard let symbol = SymbolStyle.image("apple.logo", pointSize: 96) else { return 1 }
     let fit = SymbolStyle.aspectFit(symbol.size, in: NSRect(x: 0, y: 0, width: 60, height: 72))
     guard abs(fit.width / fit.height - symbol.size.width / symbol.size.height) < 0.0001,
@@ -441,6 +441,11 @@ func selfTest() -> Int {
               abs(rect.minY + artwork.anchor.y * rect.height - origin.y) < 0.0001,
               artwork.fill.size == artwork.outline.size else { return 1 }
     }
+    do {
+        try RoomEar().start(device: UInt32.max)
+        return 1 // Unknown/external inputs must not silently select the system default.
+    } catch { }
+    guard MicList.builtInDevices().allSatisfy({ MicList.isBuiltIn($0.id) }) else { return 1 }
     var ripples = RippleField()
     ripples.update(level: 0.8, seconds: 0.016, active: true, reduceMotion: false)
     guard ripples.rings.count == 1 else { return 1 }
@@ -546,17 +551,20 @@ enum MicList {
         }
     }
 
-    /// This app listens to the room: prefer the stable built-in input without
-    /// changing the user's system input/output or forcing Bluetooth headset mode.
-    static func preferredID() -> UInt32? {
-        devices().first { device in
-            var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyTransportType,
-                mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-            var transport: UInt32 = 0
-            var size = UInt32(MemoryLayout<UInt32>.size)
-            return AudioObjectGetPropertyData(device.id, &address, 0, nil, &size, &transport) == noErr
-                && transport == kAudioDeviceTransportTypeBuiltIn
-        }?.id ?? defaultID()
+    /// Never fall back to Bluetooth, USB, or the system-selected input.
+    static func preferredID() -> UInt32? { builtInDevices().first?.id }
+
+    static func builtInDevices() -> [(id: UInt32, name: String)] {
+        devices().filter { isBuiltIn($0.id) }
+    }
+
+    static func isBuiltIn(_ id: UInt32) -> Bool {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var transport: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(id, &address, 0, nil, &size, &transport) == noErr
+            && transport == kAudioDeviceTransportTypeBuiltIn
     }
 
     static func defaultID() -> UInt32? {
@@ -627,11 +635,17 @@ final class RoomEar {
     var needsRestart: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return configurationChanged
+        // Output-route notifications also arrive when our explicitly bound input
+        // remains healthy. Rebuild only if capture actually stopped delivering.
+        return configurationChanged && !sample.isFresh(at: ProcessInfo.processInfo.systemUptime)
     }
 
     func start(device: UInt32? = nil) throws {
         stop()
+        guard let device = device ?? MicList.preferredID(), MicList.isBuiltIn(device) else {
+            throw NSError(domain: "logo-rave", code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Built-in microphone unavailable; other inputs are disabled"])
+        }
         // A disconnected CoreAudio device can invalidate the old engine's nodes.
         engine = AVAudioEngine()
         tapInstalled = false
@@ -639,15 +653,11 @@ final class RoomEar {
         lock.lock()
         let currentGeneration = generation
         lock.unlock()
-        configurationObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
-        ) { [weak self] _ in
-            guard let self else { return }
-            self.lock.lock()
-            if self.generation == currentGeneration { self.configurationChanged = true }
-            self.lock.unlock()
+        guard let unit = input.audioUnit else {
+            throw NSError(domain: "logo-rave", code: 6,
+                userInfo: [NSLocalizedDescriptionKey: "Could not bind built-in microphone"])
         }
-        if let device, device != MicList.defaultID(), let unit = input.audioUnit {
+        do {
             var id = AudioDeviceID(device)
             let status = AudioUnitSetProperty(
                 unit,
@@ -660,6 +670,14 @@ final class RoomEar {
             if status != noErr {
                 throw NSError(domain: "logo-rave", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "could not switch microphone"])
             }
+        }
+        var actualDevice = AudioDeviceID(0)
+        var deviceSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global, 0, &actualDevice, &deviceSize) == noErr,
+            actualDevice == device else {
+            throw NSError(domain: "logo-rave", code: 7,
+                userInfo: [NSLocalizedDescriptionKey: "Built-in microphone binding did not match"])
         }
         // outputFormat may still describe the previous Bluetooth route. Negotiate
         // from the current hardware input; rebuild on configuration notifications.
@@ -708,6 +726,15 @@ final class RoomEar {
             tapInstalled = false
             throw NSError(domain: "logo-rave", code: 3, userInfo: [NSLocalizedDescriptionKey: "microphone did not start"])
         }
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock()
+            if self.generation == currentGeneration { self.configurationChanged = true }
+            self.lock.unlock()
+        }
+        NSLog("Logo Rave bound built-in microphone device %u", actualDevice)
     }
 
     func rms() -> Double {

@@ -128,13 +128,10 @@ final class RaveApp: NSObject, NSApplicationDelegate {
 }
 
 final class RaveWindow: NSObject {
-    let panel = RavePanel(frame: NSRect(x: 0, y: 0, width: 280, height: 320))
+    let panel = RavePanel(frame: NSRect(x: 0, y: 0, width: 280, height: 290))
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     let popover = NSPopover()
-    let mics = NSPopUpButton(frame: NSRect(x: 16, y: 258, width: 248, height: 26), pullsDown: false)
     let quit = NSButton(title: "Quit", target: nil, action: nil)
-    var devices: [(id: UInt32, name: String)] = []
-    var onMic: ((UInt32) -> Void)?
     var onLightEnabled: ((Bool) -> Void)?
     private let lightSwitch = NSButton(checkboxWithTitle: "Light enabled", target: nil, action: nil)
 
@@ -155,50 +152,24 @@ final class RaveWindow: NSObject {
         controller.view = panel
         popover.contentViewController = controller
         popover.contentSize = panel.frame.size
-        mics.target = self
-        mics.action = #selector(pickedMic)
-        mics.font = .systemFont(ofSize: 12)
-        panel.addSubview(mics)
         quit.target = self
         quit.action = #selector(quitApp)
         quit.image = SymbolStyle.image("power", pointSize: 12, description: "Quit")
         quit.imagePosition = .imageLeading
         quit.isBordered = false
         quit.font = .systemFont(ofSize: 12)
-        quit.frame = NSRect(x: 16, y: 290, width: 66, height: 22)
+        quit.frame = NSRect(x: 16, y: 260, width: 66, height: 22)
         panel.addSubview(quit)
-        lightSwitch.frame = NSRect(x: 94, y: 288, width: 170, height: 26)
+        lightSwitch.frame = NSRect(x: 94, y: 258, width: 170, height: 26)
         lightSwitch.state = .on
         lightSwitch.target = self
         lightSwitch.action = #selector(lightChanged)
         panel.addSubview(lightSwitch)
     }
 
-    func setMics(_ devices: [(id: UInt32, name: String)], selected: UInt32?) {
-        self.devices = devices
-        mics.removeAllItems()
-        if devices.isEmpty {
-            mics.addItem(withTitle: "No microphone")
-            mics.isEnabled = false
-            return
-        }
-        mics.isEnabled = true
-        for device in devices { mics.addItem(withTitle: device.name) }
-        if let selected, let index = devices.firstIndex(where: { $0.id == selected }) {
-            mics.selectItem(at: index)
-        }
-    }
-
     @objc private func lightChanged() {
         let enabled = lightSwitch.state == .on
-        mics.isEnabled = enabled && !devices.isEmpty
         onLightEnabled?(enabled)
-    }
-
-    @objc private func pickedMic() {
-        let index = mics.indexOfSelectedItem
-        guard devices.indices.contains(index) else { return }
-        onMic?(devices[index].id)
     }
 
     @objc private func toggle() {

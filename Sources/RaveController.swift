@@ -23,12 +23,6 @@ final class RaveController {
         bright = arguments.contains("--bright")
         bus = arguments.contains("--simulate") ? nil : LogoBus.open()
         selectedMic = MicList.preferredID()
-        ui.setMics(MicList.devices(), selected: selectedMic)
-        ui.onMic = { [weak self] id in
-            guard let self else { return }
-            self.selectedMic = id
-            if self.lightEnabled { self.startMicrophone() }
-        }
         ui.onLightEnabled = { [weak self] enabled in self?.setLightEnabled(enabled) }
         clock.onFrame = { [weak self] dt in self?.update(seconds: dt) }
         delegate.onQuit = { [weak self] in self?.stop() }
@@ -44,11 +38,10 @@ final class RaveController {
 
     private func startMicrophone() {
         lastMicrophoneAttempt = ProcessInfo.processInfo.systemUptime
-        let devices = MicList.devices()
+        let devices = MicList.builtInDevices()
         if !devices.contains(where: { $0.id == selectedMic }) {
             selectedMic = MicList.preferredID()
         }
-        ui.setMics(devices, selected: selectedMic)
         do {
             try ear.start(device: selectedMic)
             micOn = true
@@ -82,7 +75,7 @@ final class RaveController {
             startMicrophone()
         }
         ui.panel.status = !preview && !bright && (!micOn || !ear.hasFreshAudio)
-            ? "Microphone unavailable · reconnecting" : "Listening to the room"
+            ? "Built-in microphone unavailable" : "Listening · built-in microphone"
         let rms: Double
         if bright {
             rms = 0.6

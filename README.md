@@ -33,7 +33,7 @@ If you already run [LogoLight](https://github.com/Ark0N/LogoLight), quit it firs
 
 The apple sits in the menu bar.
 
-- Click it to choose the microphone and watch the level. The built-in microphone is preferred for room audio; this does not change macOS input/output settings.
+- Click it to watch the level. Only the built-in microphone is used; Bluetooth and other external inputs are never selected, even if they are the macOS default. If the built-in input is unavailable, capture stays silent and retries it. This does not change macOS input/output settings.
 - Audio route changes rebuild capture, stale samples decay to silence, and the panel reports when input is unavailable.
 - Uncheck **Light enabled** to hold the logo off and stop microphone capture. Check it again to resume. This is a session-only switch; quitting still restores normal logo behavior.
 - Right-click it and choose Quit when you want the logo back to normal.
