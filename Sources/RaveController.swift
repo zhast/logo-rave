@@ -2,11 +2,21 @@ import AppKit
 
 /// Owns the app session. UI callbacks and frame updates run on the main run loop;
 /// RoomEar synchronizes its audio-thread samples separately.
+private final class AudioStartTicket {
+    private let lock = NSLock()
+    private var cancelled = false
+    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+}
+
 final class RaveController {
     let delegate = RaveApp()
     private let ui = RaveWindow()
     private let ear = RoomEar()
     private let clock = DisplayClock()
+    private let audioQueue = DispatchQueue(label: "LogoRave.microphone", qos: .userInitiated)
+    private var audioStart: AudioStartTicket?
+    private var startingMicrophone = false
     private let bus: LogoBus?
     private let preview: Bool
     private let bright: Bool
@@ -42,12 +52,26 @@ final class RaveController {
         if !devices.contains(where: { $0.id == selectedMic }) {
             selectedMic = MicList.preferredID()
         }
-        do {
-            try ear.start(device: selectedMic)
-            micOn = true
-        } catch {
-            micOn = false
-            NSLog("Logo Rave microphone unavailable: %@", error.localizedDescription)
+        audioStart?.cancel()
+        let ticket = AudioStartTicket()
+        audioStart = ticket
+        startingMicrophone = true
+        micOn = false
+        let device = selectedMic
+        let ear = self.ear
+        audioQueue.async { [weak self] in
+            guard !ticket.isCancelled else { return }
+            var failure: Error?
+            do { try ear.start(device: device) } catch { failure = error }
+            if ticket.isCancelled { ear.stop(); return }
+            let message = failure?.localizedDescription
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.audioStart === ticket, self.lightEnabled else { return }
+                self.startingMicrophone = false
+                self.micOn = message == nil
+                self.lastMicrophoneAttempt = ProcessInfo.processInfo.systemUptime
+                if let message { NSLog("Logo Rave microphone unavailable: %@", message) }
+            }
         }
     }
 
@@ -59,10 +83,14 @@ final class RaveController {
         if enabled {
             if !preview { startMicrophone() }
         } else {
-            ear.stop()
+            audioStart?.cancel()
+            audioStart = nil
+            startingMicrophone = false
             micOn = false
             bus?.turnOff()
-            ui.panel.status = "Light off · microphone stopped"
+            let ear = self.ear
+            audioQueue.async { ear.stop() }
+            ui.panel.status = "Microphone paused"
             ui.show(level: 0, animated: false)
         }
     }
@@ -70,12 +98,13 @@ final class RaveController {
     private func update(seconds dt: Double) {
         elapsed += dt
         guard lightEnabled else { return }
-        if !preview && !bright && (ear.needsRestart || !ear.hasFreshAudio) &&
+        if !preview && !bright && !startingMicrophone && (ear.needsRestart || !ear.hasFreshAudio) &&
             ProcessInfo.processInfo.systemUptime - lastMicrophoneAttempt >= 3 {
             startMicrophone()
         }
-        ui.panel.status = !preview && !bright && (!micOn || !ear.hasFreshAudio)
-            ? "Built-in microphone unavailable" : "Listening · built-in microphone"
+        ui.panel.status = startingMicrophone ? "Starting built-in microphone…" :
+            (!preview && !bright && (!micOn || !ear.hasFreshAudio)
+                ? "Built-in microphone unavailable" : "Listening · built-in microphone")
         let rms: Double
         if bright {
             rms = 0.6
@@ -92,7 +121,8 @@ final class RaveController {
 
     private func stop() {
         clock.stop()
-        ear.stop()
+        audioStart?.cancel()
+        audioQueue.sync { ear.stop() }
         bus?.restore()
     }
 }

@@ -101,6 +101,9 @@ struct FakeLogo {
             duration = command.value
         case "DisplayLogicalState":
             let lit = command.value == 2
+            // Global display-state writes also reach the keyboard. A planned
+            // keyboard-only unblank must compensate, just as on real hardware.
+            keyboardLit = lit
             if headingLit == lit {
                 ignoredRepeats += 1
                 return
@@ -216,6 +219,11 @@ final class LogoBus {
         else { return nil }
         let bus = LogoBus(type: type)
         guard bus.hasLogo else { return nil }
+        // Do not pulse global display state if keyboard isolation is unavailable.
+        guard bus.keyFn != nil, !bus.keyboardIDs.isEmpty else {
+            NSLog("Logo Rave: keyboard isolation unavailable; leaving lighting untouched")
+            return nil
+        }
         return bus
     }
 
@@ -228,7 +236,16 @@ final class LogoBus {
         } else {
             keyFn = nil
         }
-        keyboardIDs = []
+        keyboardIDs = Self.copyKeyboardIDs()
+    }
+
+    private static func copyKeyboardIDs() -> [UInt64] {
+        let selector = NSSelectorFromString("copyKeyboardBacklightIDs")
+        guard let type = NSClassFromString("KeyboardBrightnessClient") as? NSObject.Type,
+              type.instancesRespond(to: selector) else { return [] }
+        let keyboardClient = type.init()
+        let ids = keyboardClient.perform(selector)?.takeRetainedValue() as? [NSNumber]
+        return Array(Set(ids?.map(\.uint64Value) ?? [])).sorted()
     }
 
     var hasLogo: Bool {
@@ -334,6 +351,8 @@ final class LogoBus {
         copyFn(client, copySelector, key as NSString)?.takeRetainedValue()
     }
 
+    // This restores the keyboard's display-awake state, not its brightness.
+    // User brightness, ambient-light settings and idle-dimming remain macOS-owned.
     private func tellKeyboard(lit: Bool) {
         guard let keyFn else { return }
         let value = NSNumber(value: lit ? 2 : 1)
@@ -422,12 +441,11 @@ func selfTest() -> Int {
     guard !window.panel.subviews.contains(where: { $0 is NSPopUpButton }) else { return 1 }
     var toggles: [Bool] = []
     window.onLightEnabled = { toggles.append($0) }
-    guard let toggle = window.panel.subviews.compactMap({ $0 as? NSButton })
-        .first(where: { $0.title == "Light enabled" }) else { return 1 }
+    let toggle = window.logoToggle
     toggle.performClick(nil)
-    guard toggles == [false] else { return 1 }
+    guard toggles == [false], !window.panel.lightEnabled else { return 1 }
     toggle.performClick(nil)
-    guard toggles == [false, true] else { return 1 }
+    guard toggles == [false, true], window.panel.lightEnabled else { return 1 }
     guard let symbol = SymbolStyle.image("apple.logo", pointSize: 96) else { return 1 }
     let fit = SymbolStyle.aspectFit(symbol.size, in: NSRect(x: 0, y: 0, width: 60, height: 72))
     guard abs(fit.width / fit.height - symbol.size.width / symbol.size.height) < 0.0001,
@@ -733,6 +751,24 @@ final class RoomEar {
             self.lock.lock()
             if self.generation == currentGeneration { self.configurationChanged = true }
             self.lock.unlock()
+        }
+        // CoreAudio can emit a route-configuration change just after start(),
+        // stopping the engine despite its successful return. Confirm real input
+        // before reporting readiness, and resume the same built-in graph once settled.
+        let deadline = ProcessInfo.processInfo.systemUptime + 1.2
+        var resumes = 0
+        while !hasFreshAudio && ProcessInfo.processInfo.systemUptime < deadline {
+            if !engine.isRunning && resumes < 3 {
+                resumes += 1
+                let resumed = LogoCatch { try? self.engine.start() }
+                if !resumed { break }
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        guard hasFreshAudio else {
+            stop()
+            throw NSError(domain: "logo-rave", code: 8,
+                userInfo: [NSLocalizedDescriptionKey: "Built-in microphone has not delivered audio"])
         }
         NSLog("Logo Rave bound built-in microphone device %u", actualDevice)
     }

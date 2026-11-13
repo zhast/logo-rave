@@ -35,9 +35,22 @@ struct RippleField {
     }
 }
 
+/// Native button semantics with an unobtrusive visual treatment over the artwork.
+final class LogoToggleButton: NSButton {
+    override func draw(_ dirtyRect: NSRect) {
+        if window?.firstResponder === self {
+            NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()
+            let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 3, dy: 3), xRadius: 22, yRadius: 22)
+            ring.lineWidth = 2
+            ring.stroke()
+        }
+    }
+}
+
 final class RavePanel: NSView {
     var level = 0.0
     var ripples = RippleField()
+    var lightEnabled = true
     var beat = false
     var status = "Listening to the room"
     var detail = ""
@@ -53,12 +66,12 @@ final class RavePanel: NSView {
             .foregroundColor: NSColor(white: 0.92, alpha: 1),
         ])
         let titleSize = title.size()
-        title.draw(at: NSPoint(x: (bounds.width - titleSize.width) / 2, y: 8))
+        title.draw(at: NSPoint(x: (bounds.width - titleSize.width) / 2, y: 22))
 
-        let lid = NSRect(x: 36, y: 48, width: bounds.width - 72, height: 176)
+        let lid = NSRect(x: 28, y: 52, width: bounds.width - 56, height: 168)
         let shell = NSBezierPath(roundedRect: lid, xRadius: 22, yRadius: 22)
-        NSColor(white: 0.1, alpha: 1).setFill()
-        shell.fill()
+        NSGradient(starting: NSColor(white: 0.14, alpha: 1), ending: NSColor(white: 0.085, alpha: 1))?
+            .draw(in: shell, angle: 90)
 
         NSGraphicsContext.saveGraphicsState()
         shell.addClip()
@@ -70,11 +83,16 @@ final class RavePanel: NSView {
         shell.lineWidth = 1
         shell.stroke()
 
+        let stateText = NSAttributedString(string: lightEnabled ? "Light on" : "Light off", attributes: [
+            .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+            .foregroundColor: NSColor.labelColor,
+        ])
+        stateText.draw(at: NSPoint(x: (bounds.width - stateText.size().width) / 2, y: 231))
         let statusText = NSAttributedString(string: status, attributes: [
             .font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.secondaryLabelColor,
         ])
-        statusText.draw(at: NSPoint(x: (bounds.width - statusText.size().width) / 2, y: 228))
-        let meter = NSRect(x: 36, y: 244, width: bounds.width - 72, height: 4)
+        statusText.draw(at: NSPoint(x: (bounds.width - statusText.size().width) / 2, y: 254))
+        let meter = NSRect(x: 48, y: 278, width: bounds.width - 96, height: 3)
         NSColor(white: 1, alpha: 0.1).setFill()
         NSBezierPath(roundedRect: meter, xRadius: 2, yRadius: 2).fill()
         if level > 0.02 {
@@ -111,7 +129,7 @@ final class RavePanel: NSView {
             mark.draw(in: box, from: .zero, operation: .sourceOver, fraction: 0.55 + 0.45 * level, respectFlipped: true, hints: nil)
             ctx.setShadow(offset: .zero, blur: 0, color: nil)
         }
-        mark.draw(in: box, from: .zero, operation: .sourceOver, fraction: 0.22 + 0.78 * level, respectFlipped: true, hints: nil)
+        mark.draw(in: box, from: .zero, operation: .sourceOver, fraction: lightEnabled ? 0.55 + 0.45 * level : 0.18, respectFlipped: true, hints: nil)
     }
 
     private static let artwork = LogoArtwork.make()
@@ -128,12 +146,12 @@ final class RaveApp: NSObject, NSApplicationDelegate {
 }
 
 final class RaveWindow: NSObject {
-    let panel = RavePanel(frame: NSRect(x: 0, y: 0, width: 280, height: 290))
+    let panel = RavePanel(frame: NSRect(x: 0, y: 0, width: 300, height: 328))
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     let popover = NSPopover()
     let quit = NSButton(title: "Quit", target: nil, action: nil)
     var onLightEnabled: ((Bool) -> Void)?
-    private let lightSwitch = NSButton(checkboxWithTitle: "Light enabled", target: nil, action: nil)
+    let logoToggle = LogoToggleButton(title: "", target: nil, action: nil)
 
     override init() {
         super.init()
@@ -154,21 +172,40 @@ final class RaveWindow: NSObject {
         popover.contentSize = panel.frame.size
         quit.target = self
         quit.action = #selector(quitApp)
-        quit.image = SymbolStyle.image("power", pointSize: 12, description: "Quit")
+        quit.image = SymbolStyle.image("rectangle.portrait.and.arrow.right", pointSize: 11, description: "Quit Logo Rave")
         quit.imagePosition = .imageLeading
         quit.isBordered = false
-        quit.font = .systemFont(ofSize: 12)
-        quit.frame = NSRect(x: 16, y: 260, width: 66, height: 22)
+        quit.font = .systemFont(ofSize: 11)
+        quit.contentTintColor = .secondaryLabelColor
+        quit.keyEquivalent = "q"
+        quit.keyEquivalentModifierMask = .command
+        quit.frame = NSRect(x: 214, y: 297, width: 66, height: 22)
         panel.addSubview(quit)
-        lightSwitch.frame = NSRect(x: 94, y: 258, width: 170, height: 26)
-        lightSwitch.state = .on
-        lightSwitch.target = self
-        lightSwitch.action = #selector(lightChanged)
-        panel.addSubview(lightSwitch)
+        let hint = NSTextField(labelWithString: "Click logo or press Space")
+        hint.font = .systemFont(ofSize: 10)
+        hint.textColor = .tertiaryLabelColor
+        hint.frame = NSRect(x: 20, y: 301, width: 178, height: 16)
+        panel.addSubview(hint)
+        logoToggle.frame = NSRect(x: 96, y: 88, width: 108, height: 96)
+        logoToggle.setButtonType(.pushOnPushOff)
+        logoToggle.isBordered = false
+        logoToggle.state = .on
+        logoToggle.target = self
+        logoToggle.action = #selector(lightChanged)
+        logoToggle.keyEquivalent = " "
+        logoToggle.keyEquivalentModifierMask = []
+        logoToggle.setAccessibilityLabel("Logo light, on")
+        logoToggle.setAccessibilityHelp("Toggle the logo light and microphone. Space toggles while this panel is open.")
+        logoToggle.toolTip = "Turn light off · Space"
+        panel.addSubview(logoToggle)
     }
 
     @objc private func lightChanged() {
-        let enabled = lightSwitch.state == .on
+        let enabled = logoToggle.state == .on
+        panel.lightEnabled = enabled
+        logoToggle.setAccessibilityLabel(enabled ? "Logo light, on" : "Logo light, off")
+        logoToggle.toolTip = enabled ? "Turn light off · Space" : "Turn light on · Space"
+        panel.needsDisplay = true
         onLightEnabled?(enabled)
     }
 

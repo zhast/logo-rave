@@ -1,67 +1,89 @@
 # Logo Rave
 
-The glowing Apple logo on your MacBook, driven by the room.
+**Make your MacBook’s glowing lid logo react to the sound around you.**
 
-![Logo Rave menu bar panel, with the logo lit](docs/panel.png)
+Play music, clap, or talk. Logo Rave uses the **built-in microphone** to make the lid logo brighten with louder sounds and fade in quieter moments. It lives in the menu bar, with no Dock icon.
 
-Play music on a speaker. The lid logo brightens with it. Logo Rave listens to the microphone, not to audio the Mac itself is playing, so a Bluetooth speaker, a phone, or a party in the room all work.
+## What you need
 
-Click the apple in the menu bar to pick a microphone. Right-click it and choose Quit. Closing the panel does not stop the light.
+- A MacBook with a supported, illuminated lid logo. The app checks for the logo backlight hardware; it cannot light a logo that has no backlight.
+- A built-in microphone and permission to use it.
+- Xcode or the Xcode Command Line Tools to build the app.
 
-## You need
+The app’s deployment target is macOS 14 or later, but its lighting controls use private Apple APIs. Hardware and macOS compatibility are not guaranteed. The keyboard-isolation fix was checked on a MacBook running macOS 27.2.1.
 
-- A MacBook with the lit lid logo. That is the 14-inch and 16-inch Pro models that still glow.
-- macOS 14 or later.
-- A microphone. The built-in one is fine.
+## Build and open
 
-A Mac mini, a Mac Studio, and older MacBooks with a dark lid logo have nothing for this app to drive.
-
-## Install
-
-```
+```sh
 git clone https://github.com/zhast/logo-rave.git
 cd logo-rave
 make
 open "Logo Rave.app"
 ```
 
-The first time you open it, macOS will refuse a normal double-click. Right-click the app, choose Open, then Open again. Allow the microphone when asked.
+Allow microphone access when prompted. If needed, check **System Settings → Privacy & Security → Microphone**.
 
-If you already run [LogoLight](https://github.com/Ark0N/LogoLight), quit it first. Both apps write to the same logo, and they fight.
+`make` creates and locally signs `Logo Rave.app` in the repository. This is a local build, not a notarized release. Quit other apps that control the lid light, such as [LogoLight](https://github.com/Ark0N/LogoLight), so they do not compete.
 
-## Use
+## Everyday controls
 
-The apple sits in the menu bar.
+| To… | Do this |
+| --- | --- |
+| Open the panel | Click the Apple icon in the menu bar. |
+| Turn the light off | Click the large Apple logo in the panel, or press **Space** while the panel is open. Microphone capture also stops. |
+| Turn it back on | Click the logo or press **Space** again. |
+| Close the panel | Click outside it. The app keeps listening and controlling the light. |
+| Quit | Click **Quit** in the panel, or right-click the menu-bar icon and choose **Quit**. Normal logo lighting is restored. |
 
-- Click it to watch the level. Only the built-in microphone is used; Bluetooth and other external inputs are never selected, even if they are the macOS default. If the built-in input is unavailable, capture stays silent and retries it. This does not change macOS input/output settings.
-- Audio route changes rebuild capture, stale samples decay to silence, and the panel reports when input is unavailable.
-- Uncheck **Light enabled** to hold the logo off and stop microphone capture. Check it again to resume. This is a session-only switch; quitting still restores normal logo behavior.
-- Right-click it and choose Quit when you want the logo back to normal.
-- Louder room, brighter logo. Quiet room, it fades back down.
+The on/off switch lasts for the current session. Quitting is different from turning the light off: quitting returns the logo to normal behavior.
 
-## Build it yourself
+## Audio and privacy
 
+- **Built-in microphone only.** There is no input picker, and the app never falls back to a Bluetooth headset or another external microphone.
+- It hears the room, not a direct feed of system audio. Music played through speakers can be heard; audio in headphones may not be.
+- It measures sound level locally. It does not save recordings or upload microphone audio.
+- The meter is a smoothed relative sound level, not a calibrated sound-pressure meter. The light follows loudness, not detected musical tempo.
+- The Apple-shaped ripples are a visual effect in the panel.
+
+## If something looks wrong
+
+**“Starting built-in microphone…”**
+Capture is warming up. The interface stays responsive while the audio engine starts.
+
+**“Built-in microphone unavailable”**
+Check microphone permission. The app retries the built-in input and recovers from audio-device changes; it will not silently choose another microphone.
+
+**The panel moves, but the physical logo does not**
+Check that your Mac has supported logo hardware and that no other app is controlling it. If the keyboard-isolation API is unavailable, Logo Rave leaves hardware lighting untouched rather than risk pulsing the keyboard.
+
+**The keyboard backlight moves with the logo**
+Use the latest build and quit any older copies. Logo Rave restores the keyboard’s display-awake state after each global logo fade command without changing your brightness, auto-brightness, or idle-dimming settings. This depends on private APIs and may need adjustment after a macOS update.
+
+**The meter pulses regularly regardless of sound**
+Make sure the app was not launched with the developer-only `--preview` flag. Quit it and open it normally. Preview uses synthetic pulses; it does not listen to the microphone.
+
+## Development
+
+```sh
+make          # Build the app
+make test     # Run simulated/regression checks; does not change lighting
+make icon     # Regenerate the SF Symbols-based app icon
 ```
-make
-make test
+
+For Xcode, open `Logo Rave.xcodeproj`, select **Logo Rave → My Mac**, and run with **⌘R**. Quit an existing copy first. Debug builds include symbols and disable Swift optimization.
+
+For UI-only synthetic testing without hardware writes:
+
+```sh
+open -n "Logo Rave.app" --args --simulate --preview
 ```
 
-`make` writes `Logo Rave.app` in this folder and signs it so your Mac can open it. `make test` checks the level math without touching the logo.
+`--preview` alone **does control the physical logo**, so combine it with `--simulate` when you only want to test the interface.
 
-## How it hears the room
+The automated checks exercise audio-level math, stale-audio handling, light command planning and panel toggles. They do not replace testing the real microphone and backlights. For the keyboard fix, hardware checks included 1,000 PWM samples during logo pulses and eight light off/on cycles; the keyboard remained enabled, with at most a 0.00104 absolute PWM-duty change during the toggle test.
 
-The microphone tap measures how loud the room is. That level is smoothed, then sent to the logo through the private CoreBrightness API that also drives the keyboard backlight. The same approach is what LogoLight uses. It is private API, so a macOS update can break it.
-
-The light follows loudness. It does not try to guess the tempo.
+If the app exits unexpectedly, useful Xcode symbolic breakpoints are `-[NSApplication terminate:]`, `objc_exception_throw`, and `abort`. A normal termination is not necessarily a crash; inspect the caller stack before attributing the cause.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
-
-## Xcode debugging
-
-Open `Logo Rave.xcodeproj`, select the **Logo Rave** scheme and **My Mac**, then Run (⌘R). Debug builds include symbols and disable Swift optimization. The original Makefile build remains available.
-
-To investigate an unexpected exit, set symbolic breakpoints on `-[NSApplication terminate:]`, `objc_exception_throw`, and `abort`. A normal termination is not an OS crash; capture the caller stack before attributing its cause.
-
-Icon artwork uses configured SF Symbols with aspect-fit geometry. Run `make icon` to regenerate all icon resolutions; both Makefile and Xcode builds include the resulting AppIcon.icns.
+[MIT](LICENSE).
